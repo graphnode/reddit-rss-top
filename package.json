@@ -1,0 +1,15 @@
+{
+  "name": "reddit-rss-top",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reddit top posts RSS feed generator - Cloudflare Workers",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js && wrangler dev",
+    "deploy": "node build.js && wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

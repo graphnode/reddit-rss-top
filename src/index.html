@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Reddit → RSS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', system-ui, sans-serif; background: #09090d; color: #d8d5d0; min-height: 100vh; min-height: 100dvh; padding: 20px 16px 80px; }
+  ::selection { background: #e8572030; color: #e85720; }
+
+  .wrap { max-width: 680px; margin: 0 auto; }
+
+  /* Header */
+  .hdr { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .hdr-icon { width: 42px; height: 42px; border-radius: 10px; background: linear-gradient(135deg,#e8572012,#e8572006); border: 1px solid #e8572020; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .hdr h1 { font-weight: 900; font-size: 20px; color: #f0ede8; letter-spacing: -0.03em; line-height: 1.2; }
+  .hdr p { font-size: 11px; color: #4a4a55; margin-top: 1px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 2px; margin-bottom: 14px; background: #0e0e14; border-radius: 9px; padding: 3px; }
+  .tabs button { flex: 1; font-family: 'DM Sans'; font-size: 12px; font-weight: 500; background: transparent; border: none; border-radius: 7px; padding: 8px 0; color: #555; cursor: pointer; transition: all .12s; }
+  .tabs button.on { font-weight: 700; background: #1a1a24; color: #e85720; }
+  .tabs button:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* Card */
+  .card { background: #0e0e14; border: 1px solid #1a1a24; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+
+  /* Fields */
+  label.lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #666; display: block; margin-bottom: 5px; }
+  input, select { font-family: 'JetBrains Mono', monospace; font-size: 13px; background: #09090d; border: 1.5px solid #222230; border-radius: 8px; padding: 10px 12px; color: #d8d5d0; width: 100%; transition: border-color .2s, box-shadow .2s; }
+  input:focus, select:focus { outline: none; border-color: #e85720; box-shadow: 0 0 0 3px #e8572015; }
+  .hint { font-size: 9px; color: #444; margin-top: 3px; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+
+  /* Source buttons */
+  .src-row { display: flex; gap: 5px; }
+  .src-btn { font-family: 'DM Sans'; font-size: 12px; font-weight: 400; background: #09090d; border: 1.5px solid #1e1e28; border-radius: 7px; padding: 7px 0; color: #777; cursor: pointer; flex: 1; transition: all .12s; }
+  .src-btn.on { font-weight: 700; background: #e8572015; border-color: #e8572035; color: #e85720; }
+
+  /* Main button */
+  .gen-btn { font-family: 'DM Sans'; font-weight: 700; font-size: 14px; background: #e85720; color: #09090d; border: none; border-radius: 9px; padding: 13px 0; cursor: pointer; transition: all .12s; width: 100%; margin-top: 2px; }
+  .gen-btn:disabled { background: #2a2a35; color: #666; cursor: not-allowed; }
+  .gen-btn:hover:not(:disabled) { filter: brightness(1.1); }
+
+  /* Spinner */
+  @keyframes spin { to { transform: rotate(360deg) } }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #555; border-top-color: #e85720; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 8px; }
+
+  /* Error */
+  .err { background: #1a1014; border: 1px solid #301818; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #d06040; line-height: 1.6; white-space: pre-wrap; }
+
+  /* Results bar */
+  .res-bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .res-bar .count { font-size: 14px; font-weight: 700; color: #e0ddd8; }
+  .res-bar .meta { font-size: 12px; color: #555; margin-left: 6px; }
+  .hl { color: #e85720; font-family: 'JetBrains Mono'; font-weight: 600; }
+
+  /* Action buttons */
+  .act-row { display: flex; gap: 5px; }
+  .sm-btn { font-family: 'DM Sans'; font-size: 11px; font-weight: 500; background: transparent; border: 1px solid #2a2a35; border-radius: 7px; padding: 6px 14px; color: #999; cursor: pointer; transition: all .12s; }
+  .sm-btn:hover { filter: brightness(1.15); }
+  .sm-btn.pri { background: #e8572012; border-color: #e8572030; color: #e85720; }
+
+  /* Sub tags */
+  .tags { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tag { font-family: 'JetBrains Mono'; font-size: 9px; background: #13131a; border: 1px solid #1e1e28; padding: 2px 7px; border-radius: 4px; color: #777; }
+  .tag b { color: #e85720; font-weight: 600; }
+
+  /* Post list */
+  .post { display: flex; gap: 11px; padding: 9px 10px; border-radius: 8px; transition: background .12s; }
+  .post:hover { background: #12121a; }
+  .vote { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 40px; padding-top: 2px; }
+  .vote .n { font-family: 'JetBrains Mono'; font-weight: 700; font-size: 11px; color: #e85720; }
+  .post-body { flex: 1; min-width: 0; }
+  .post-body a { font-size: 13px; font-weight: 500; color: #ddd8d0; text-decoration: none; line-height: 1.45; display: block; }
+  .post-body a:hover { color: #fff; }
+  .post-meta { margin-top: 3px; font-size: 10px; color: #4a4a55; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .sub { font-family: 'JetBrains Mono'; font-size: 9px; background: #13131a; padding: 1px 5px; border-radius: 3px; color: #777; }
+  .dot { color: #2a2a35; }
+
+  /* RSS URL box */
+  .rss-url-box { background: #09090d; border: 1.5px solid #222230; border-radius: 8px; padding: 10px 12px; margin-top: 6px; display: flex; align-items: center; gap: 8px; }
+  .rss-url-box input { border: none; background: none; flex: 1; font-size: 11px; padding: 0; }
+  .rss-url-box input:focus { box-shadow: none; }
+  .rss-url-box button { font-family: 'DM Sans'; font-size: 10px; font-weight: 600; background: #e8572018; border: 1px solid #e8572030; border-radius: 5px; padding: 4px 10px; color: #e85720; cursor: pointer; white-space: nowrap; }
+
+  /* XML */
+  .xml-pre { font-family: 'JetBrains Mono', monospace; font-size: 10px; line-height: 1.65; background: #06060a; border: 1px solid #1a1a24; border-radius: 10px; padding: 14px; color: #6a6860; overflow-x: auto; max-height: 480px; white-space: pre; }
+  .xml-pre::-webkit-scrollbar { height: 5px; width: 5px; }
+  .xml-pre::-webkit-scrollbar-thumb { background: #252530; border-radius: 3px; }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 40px 20px; color: #3a3a45; }
+  .empty p:first-child { font-size: 13px; }
+  .empty p:last-child { font-size: 11px; margin-top: 6px; }
+
+  /* Animations */
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(5px) } to { opacity: 1; transform: translateY(0) } }
+  .fade { animation: fadeIn .25s ease both; }
+
+  .info { font-size: 10px; color: #444; line-height: 1.7; }
+
+  /* Hide tab content */
+  .panel { display: none; }
+  .panel.show { display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- Header -->
+  <div class="hdr">
+    <div class="hdr-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e85720" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1.5" fill="#e85720"/></svg>
+    </div>
+    <div>
+      <h1>Reddit &rarr; RSS</h1>
+      <p>Todo o Reddit &middot; Filtro por upvotes &middot; Cloudflare Workers</p>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="on" onclick="showTab('config')">&#9881; Config</button>
+    <button id="tab-results" onclick="showTab('results')" disabled>&#128203; Posts</button>
+    <button id="tab-xml" onclick="showTab('xml')" disabled>&#128196; XML</button>
+  </div>
+
+  <!-- CONFIG -->
+  <div id="p-config" class="panel show">
+    <div class="card">
+      <div>
+        <label class="lbl">Fonte</label>
+        <div class="src-row">
+          <button class="src-btn on" onclick="setSource('all',this)">r/all</button>
+          <button class="src-btn" onclick="setSource('popular',this)">r/popular</button>
+          <button class="src-btn" onclick="setSource('custom',this)">Espec&iacute;ficos</button>
+        </div>
+      </div>
+
+      <div id="custom-field" style="display:none">
+        <label class="lbl">Subreddits</label>
+        <input id="subs" value="programming, devops, selfhosted" placeholder="programming, devops">
+        <div class="hint">Separados por v&iacute;rgula</div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label class="lbl">M&iacute;n. upvotes</label>
+          <input id="threshold" type="number" value="1000" min="0" step="100">
+        </div>
+        <div>
+          <label class="lbl">Per&iacute;odo</label>
+          <select id="timeframe">
+            <option value="hour">&Uacute;ltima hora</option>
+            <option value="day" selected>Hoje</option>
+            <option value="week">Esta semana</option>
+            <option value="month">Este m&ecirc;s</option>
+            <option value="year">Este ano</option>
+            <option value="all">Todos</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl">P&aacute;ginas</label>
+          <select id="pages">
+            <option value="1">1&times;100</option>
+            <option value="2" selected>2&times;100</option>
+            <option value="3">3&times;100</option>
+            <option value="5">5&times;100</option>
+          </select>
+        </div>
+      </div>
+
+      <button class="gen-btn" id="gen-btn" onclick="generate()">Gerar RSS</button>
+
+      <div id="error" class="err" style="display:none"></div>
+
+      <div class="info">
+        O feed RSS &eacute; gerado server-side via Cloudflare Workers.<br>
+        Usa o URL do feed diretamente no teu leitor RSS para atualiza&ccedil;&otilde;es autom&aacute;ticas.
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="p-results" class="panel"></div>
+
+  <!-- XML -->
+  <div id="p-xml" class="panel"></div>
+</div>
+
+<script>
+let currentSource = 'all';
+let allPosts = [];
+let rssXml = '';
+let currentRssUrl = '';
+
+function showTab(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('show'));
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('on'));
+  document.getElementById('p-' + id).classList.add('show');
+  const idx = { config: 0, results: 1, xml: 2 }[id];
+  document.querySelectorAll('.tabs button')[idx].classList.add('on');
+}
+
+function setSource(src, btn) {
+  currentSource = src;
+  document.querySelectorAll('.src-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('custom-field').style.display = src === 'custom' ? 'block' : 'none';
+}
+
+function fmt(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
+}
+
+function timeAgo(utc) {
+  const mins = Math.floor((Date.now() / 1000 - utc) / 60);
+  if (mins < 60) return mins + 'm';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h';
+  return Math.floor(hrs / 24) + 'd';
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function buildRssUrl() {
+  const base = window.location.origin + '/rss';
+  const params = new URLSearchParams();
+  params.set('source', currentSource);
+  params.set('threshold', document.getElementById('threshold').value);
+  params.set('t', document.getElementById('timeframe').value);
+  params.set('pages', document.getElementById('pages').value);
+  if (currentSource === 'custom') {
+    params.set('subs', document.getElementById('subs').value);
+  }
+  return base + '?' + params.toString();
+}
+
+function setProgress(msg) {
+  const btn = document.getElementById('gen-btn');
+  btn.innerHTML = '<span class="spinner"></span>' + msg;
+}
+
+async function generate() {
+  const btn = document.getElementById('gen-btn');
+  const errEl = document.getElementById('error');
+  btn.disabled = true;
+  errEl.style.display = 'none';
+
+  const threshold = parseInt(document.getElementById('threshold').value) || 0;
+  const timeframe = document.getElementById('timeframe').value;
+  const pages = document.getElementById('pages').value;
+
+  try {
+    setProgress('A buscar posts...');
+
+    const params = new URLSearchParams();
+    params.set('source', currentSource);
+    params.set('threshold', threshold);
+    params.set('t', timeframe);
+    params.set('pages', pages);
+    if (currentSource === 'custom') {
+      params.set('subs', document.getElementById('subs').value);
+    }
+
+    const apiUrl = '/api/posts?' + params.toString();
+    const rssUrl = '/rss?' + params.toString();
+    currentRssUrl = window.location.origin + rssUrl;
+
+    const res = await fetch(apiUrl);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'HTTP ' + res.status);
+    }
+    const data = await res.json();
+    allPosts = data.posts;
+
+    // Fetch RSS XML for preview
+    setProgress('A gerar RSS...');
+    const rssRes = await fetch(rssUrl);
+    rssXml = await rssRes.text();
+
+    renderResults(allPosts, data.count, threshold);
+    renderXml();
+
+    document.getElementById('tab-results').disabled = false;
+    document.getElementById('tab-xml').disabled = false;
+    showTab('results');
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Gerar RSS';
+}
+
+function renderResults(posts, total, threshold) {
+  const el = document.getElementById('p-results');
+  if (!posts.length) {
+    el.innerHTML = '<div class="empty"><p>Nenhum post com &ge; ' + fmt(threshold) + ' upvotes.</p><p>Reduz o threshold ou aumenta o per&iacute;odo.</p></div>';
+    return;
+  }
+
+  const subs = {};
+  posts.forEach(p => subs[p.subreddit] = (subs[p.subreddit] || 0) + 1);
+  const topSubs = Object.entries(subs).sort((a, b) => b[1] - a[1]).slice(0, 15);
+
+  let html = '<div class="res-bar">' +
+    '<div><span class="count">' + posts.length + ' posts</span><span class="meta"> &middot; <span class="hl">&ge;' + fmt(threshold) + '</span></span></div>' +
+    '<div class="act-row">' +
+    '<button class="sm-btn" onclick="showTab(\'xml\')">XML</button>' +
+    '<button class="sm-btn pri" onclick="downloadRss()">&#8595; .rss</button>' +
+    '</div></div>';
+
+  // RSS URL box
+  html += '<div class="rss-url-box">' +
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e85720" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1.5" fill="#e85720"/></svg>' +
+    '<input type="text" value="' + esc(currentRssUrl) + '" readonly onclick="this.select()">' +
+    '<button onclick="copyUrl(this)">Copiar URL</button>' +
+    '</div>';
+
+  html += '<div class="tags" style="margin-top:12px">';
+  topSubs.forEach(([s, c]) => { html += '<span class="tag">' + s + ' <b>' + c + '</b></span>'; });
+  html += '</div>';
+
+  html += '<div>';
+  posts.forEach(p => {
+    html += '<div class="post fade">' +
+      '<div class="vote"><svg width="9" height="6" viewBox="0 0 12 8" fill="#e85720"><path d="M6 0l6 8H0z"/></svg><span class="n">' + fmt(p.score) + '</span></div>' +
+      '<div class="post-body">' +
+      '<a href="https://www.reddit.com' + esc(p.permalink) + '" target="_blank" rel="noopener">' + esc(p.title) + '</a>' +
+      '<div class="post-meta"><span class="sub">r/' + esc(p.subreddit) + '</span><span class="dot">&middot;</span><span>' + fmt(p.num_comments) + ' comments</span><span class="dot">&middot;</span><span>' + timeAgo(p.created_utc) + '</span></div>' +
+      '</div></div>';
+  });
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+function renderXml() {
+  const el = document.getElementById('p-xml');
+  el.innerHTML = '<div class="res-bar"><span style="font-size:13px;font-weight:700;color:#bbb">RSS XML</span>' +
+    '<div class="act-row"><button class="sm-btn" onclick="copyXml()">Copiar</button>' +
+    '<button class="sm-btn pri" onclick="downloadRss()">&#8595; .rss</button></div></div>' +
+    '<div class="rss-url-box" style="margin-bottom:12px">' +
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e85720" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1.5" fill="#e85720"/></svg>' +
+    '<input type="text" value="' + esc(currentRssUrl) + '" readonly onclick="this.select()">' +
+    '<button onclick="copyUrl(this)">Copiar URL</button>' +
+    '</div>' +
+    '<pre class="xml-pre">' + esc(rssXml) + '</pre>';
+}
+
+function downloadRss() {
+  const blob = new Blob([rssXml], { type: 'application/rss+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'reddit-top.rss';
+  a.click();
+}
+
+function copyXml() {
+  navigator.clipboard.writeText(rssXml).then(() => {
+    const btns = document.querySelectorAll('#p-xml .sm-btn:not(.pri)');
+    if (btns[0]) { btns[0].textContent = 'Copiado!'; setTimeout(() => btns[0].textContent = 'Copiar', 2000); }
+  });
+}
+
+function copyUrl(btn) {
+  navigator.clipboard.writeText(currentRssUrl).then(() => {
+    btn.textContent = 'Copiado!';
+    setTimeout(() => btn.textContent = 'Copiar URL', 2000);
+  });
+}
+</script>
+</body>
+</html>
