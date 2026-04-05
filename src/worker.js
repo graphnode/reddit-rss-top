@@ -1,4 +1,5 @@
 const REDDIT_BASE = 'https://www.reddit.com';
+const CORS_PROXY = 'https://corsproxy.io/?url=';
 const USER_AGENT = 'reddit-rss-top/1.0 (Cloudflare Worker)';
 
 export default {
@@ -31,19 +32,40 @@ export default {
   },
 };
 
-// --- Reddit fetching ---
+// --- Reddit fetching with corsproxy.io fallback ---
+
+async function fetchRedditJson(url) {
+  // Try direct first
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT },
+    });
+    if (res.ok) {
+      const text = await res.text();
+      if (text.startsWith('{') || text.startsWith('[')) {
+        return JSON.parse(text);
+      }
+    }
+  } catch (_) { /* fall through to proxy */ }
+
+  // Fallback: corsproxy.io
+  const proxyUrl = CORS_PROXY + encodeURIComponent(url);
+  const res = await fetch(proxyUrl, {
+    headers: { 'User-Agent': USER_AGENT },
+  });
+  if (!res.ok) throw new Error(`Reddit API error: ${res.status} (via proxy)`);
+  const text = await res.text();
+  if (!text.startsWith('{') && !text.startsWith('[')) {
+    throw new Error('Reddit returned non-JSON response (likely blocked)');
+  }
+  return JSON.parse(text);
+}
 
 async function fetchRedditPage(path, after) {
   let url = `${REDDIT_BASE}${path}.json?limit=100&raw_json=1`;
   if (after) url += `&after=${after}`;
 
-  const res = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT },
-    cf: { cacheTtl: 300, cacheEverything: true },
-  });
-
-  if (!res.ok) throw new Error(`Reddit API error: ${res.status}`);
-  const json = await res.json();
+  const json = await fetchRedditJson(url);
   if (!json?.data?.children) throw new Error('Unexpected Reddit response format');
   return json.data;
 }
