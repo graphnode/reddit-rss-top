@@ -1,12 +1,5 @@
 const USER_AGENT = 'reddit-rss-top/1.0 (Cloudflare Worker)';
 
-const FETCH_METHODS = [
-  { name: 'direct', url: (u) => u },
-  { name: 'corsproxy.io', url: (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u) },
-  { name: 'allorigins', url: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
-  { name: 'jsonp.afeld', url: (u) => 'https://jsonp.afeld.me/?url=' + encodeURIComponent(u) },
-];
-
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -37,51 +30,58 @@ export default {
   },
 };
 
-// --- Reddit fetching with multiple proxy fallbacks ---
+// --- Reddit OAuth ---
 
-async function fetchRedditJson(redditUrl) {
-  const errors = [];
+let cachedToken = null;
+let tokenExpiry = 0;
 
-  for (const method of FETCH_METHODS) {
-    try {
-      const targetUrl = method.url(redditUrl);
-      const res = await fetch(targetUrl, {
-        headers: { 'User-Agent': USER_AGENT },
-      });
-      if (!res.ok) {
-        errors.push(`${method.name}: HTTP ${res.status}`);
-        continue;
-      }
-      const text = await res.text();
-      const trimmed = text.trimStart();
-      if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-        errors.push(`${method.name}: got HTML instead of JSON`);
-        continue;
-      }
-      return JSON.parse(trimmed);
-    } catch (e) {
-      errors.push(`${method.name}: ${e.message}`);
-    }
-  }
+async function getAccessToken(env) {
+  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
 
-  throw new Error('All fetch methods failed: ' + errors.join(' | '));
+  const res = await fetch('https://www.reddit.com/api/v1/access_token', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + btoa(`${env.REDDIT_CLIENT_ID}:${env.REDDIT_CLIENT_SECRET}`),
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': USER_AGENT,
+    },
+    body: 'grant_type=client_credentials',
+  });
+
+  if (!res.ok) throw new Error(`Reddit OAuth failed: ${res.status}`);
+  const data = await res.json();
+  cachedToken = data.access_token;
+  tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+  return cachedToken;
 }
 
-async function fetchRedditPage(path, after) {
-  let url = `${REDDIT_BASE}${path}.json?limit=100&raw_json=1`;
+// --- Reddit fetching via OAuth ---
+
+async function fetchRedditPage(env, path, after) {
+  const token = await getAccessToken(env);
+  let url = `https://oauth.reddit.com${path}`;
+  url += (url.includes('?') ? '&' : '?') + 'limit=100&raw_json=1';
   if (after) url += `&after=${after}`;
 
-  const json = await fetchRedditJson(url);
+  const res = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'User-Agent': USER_AGENT,
+    },
+  });
+
+  if (!res.ok) throw new Error(`Reddit API error: ${res.status}`);
+  const json = await res.json();
   if (!json?.data?.children) throw new Error('Unexpected Reddit response format');
   return json.data;
 }
 
-async function fetchAllPages(path, maxPages) {
+async function fetchAllPages(env, path, maxPages) {
   const posts = [];
   let after = null;
 
   for (let i = 0; i < maxPages; i++) {
-    const data = await fetchRedditPage(path, after);
+    const data = await fetchRedditPage(env, path, after);
     posts.push(...data.children.map((c) => c.data));
     after = data.after;
     if (!after) break;
@@ -89,6 +89,7 @@ async function fetchAllPages(path, maxPages) {
 
   return posts;
 }
+
 
 function filterAndSort(posts, threshold) {
   const seen = new Set();
@@ -119,17 +120,17 @@ function buildPath(source, sub, timeframe) {
   return `${base}/top/?sort=top&t=${timeframe}`;
 }
 
-async function getPosts(params) {
+async function getPosts(env, params) {
   const { source, subreddits, threshold, timeframe, pages } = params;
   let posts = [];
 
   if (source === 'custom' && subreddits.length > 0) {
     const results = await Promise.all(
-      subreddits.map((sub) => fetchAllPages(buildPath(null, sub, timeframe), pages).catch(() => []))
+      subreddits.map((sub) => fetchAllPages(env, buildPath(null, sub, timeframe), pages).catch(() => []))
     );
     posts = results.flat();
   } else {
-    posts = await fetchAllPages(buildPath(source, null, timeframe), pages);
+    posts = await fetchAllPages(env, buildPath(source, null, timeframe), pages);
   }
 
   return filterAndSort(posts, threshold);
@@ -184,7 +185,7 @@ ${items}
 
 async function handleRss(url, env) {
   const params = parseParams(url, env);
-  const posts = await getPosts(params);
+  const posts = await getPosts(env, params);
 
   return new Response(buildRssXml(posts, params), {
     headers: {
@@ -196,7 +197,7 @@ async function handleRss(url, env) {
 
 async function handleApi(url, env) {
   const params = parseParams(url, env);
-  const posts = await getPosts(params);
+  const posts = await getPosts(env, params);
 
   return new Response(
     JSON.stringify({
