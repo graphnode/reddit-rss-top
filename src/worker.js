@@ -1,6 +1,11 @@
-const REDDIT_BASE = 'https://www.reddit.com';
-const CORS_PROXY = 'https://corsproxy.io/?url=';
 const USER_AGENT = 'reddit-rss-top/1.0 (Cloudflare Worker)';
+
+const FETCH_METHODS = [
+  { name: 'direct', url: (u) => u },
+  { name: 'corsproxy.io', url: (u) => 'https://corsproxy.io/?url=' + encodeURIComponent(u) },
+  { name: 'allorigins', url: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
+  { name: 'jsonp.afeld', url: (u) => 'https://jsonp.afeld.me/?url=' + encodeURIComponent(u) },
+];
 
 export default {
   async fetch(request, env) {
@@ -32,33 +37,34 @@ export default {
   },
 };
 
-// --- Reddit fetching with corsproxy.io fallback ---
+// --- Reddit fetching with multiple proxy fallbacks ---
 
-async function fetchRedditJson(url) {
-  // Try direct first
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': USER_AGENT },
-    });
-    if (res.ok) {
-      const text = await res.text();
-      if (text.startsWith('{') || text.startsWith('[')) {
-        return JSON.parse(text);
+async function fetchRedditJson(redditUrl) {
+  const errors = [];
+
+  for (const method of FETCH_METHODS) {
+    try {
+      const targetUrl = method.url(redditUrl);
+      const res = await fetch(targetUrl, {
+        headers: { 'User-Agent': USER_AGENT },
+      });
+      if (!res.ok) {
+        errors.push(`${method.name}: HTTP ${res.status}`);
+        continue;
       }
+      const text = await res.text();
+      const trimmed = text.trimStart();
+      if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+        errors.push(`${method.name}: got HTML instead of JSON`);
+        continue;
+      }
+      return JSON.parse(trimmed);
+    } catch (e) {
+      errors.push(`${method.name}: ${e.message}`);
     }
-  } catch (_) { /* fall through to proxy */ }
-
-  // Fallback: corsproxy.io
-  const proxyUrl = CORS_PROXY + encodeURIComponent(url);
-  const res = await fetch(proxyUrl, {
-    headers: { 'User-Agent': USER_AGENT },
-  });
-  if (!res.ok) throw new Error(`Reddit API error: ${res.status} (via proxy)`);
-  const text = await res.text();
-  if (!text.startsWith('{') && !text.startsWith('[')) {
-    throw new Error('Reddit returned non-JSON response (likely blocked)');
   }
-  return JSON.parse(text);
+
+  throw new Error('All fetch methods failed: ' + errors.join(' | '));
 }
 
 async function fetchRedditPage(path, after) {
