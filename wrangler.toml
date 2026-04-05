@@ -1,6 +1,7 @@
 name = "reddit-rss-top"
 main = "dist/worker.js"
 compatibility_date = "2024-01-01"
+account_id = "6c2282b5b67960d48321da8b9a99b8a3"
 
 [vars]
 DEFAULT_THRESHOLD = "1000"
